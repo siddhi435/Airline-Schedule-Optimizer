@@ -31,7 +31,7 @@ Due to capacity limitations and heavy passenger load, flight operations at busy 
 ## Project Structure
 
 ```
-Flight-Schedule-Optimization/
+Airline Schedule Optimizer
 ├── app/
 │   ├── main.py                 # Main Streamlit application
 │   └── main_updated.py         # Updated version with enhancements
