@@ -1943,166 +1943,85 @@ class FlightDashboard:
     def train_predictor(self):
         """Train a real machine learning delay prediction model on actual flight data."""
         df = self.load_data()
-        
+
         if df.empty:
             st.error("❌ No data available for training")
             return
-        
+
         if len(df) < 50:
             st.error("❌ Need at least 50 flights for reliable ML training")
             return
-        
+
+        # User-selectable options
+        st.sidebar.markdown("### 🤖 ML Training Options")
+        model_type = st.sidebar.selectbox(
+            "Model Type",
+            ['xgboost', 'random_forest', 'ensemble', 'nn'],
+            index=2
+        )
+        use_tuning = st.sidebar.checkbox("Enable Optuna hyperparameter tuning", value=False)
+        use_cv = st.sidebar.checkbox("Enable k-fold cross-validation", value=True)
+        save_to_mlflow = st.sidebar.checkbox("Log model to MLflow", value=False)
+        model_name = st.sidebar.text_input("Model save name", "delay_predictor")
+
         with st.spinner("Training real ML predictor on flight data..."):
             try:
-                # Import required ML libraries
-                from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-                from sklearn.model_selection import train_test_split
-                from sklearn.preprocessing import LabelEncoder, StandardScaler
-                from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-                import numpy as np
-                
-                # Prepare features for ML training
-                ml_df = df.copy()
-                
-                # Feature engineering for real ML training
-                ml_df['Hour'] = pd.to_datetime(ml_df['Scheduled_Time']).dt.hour
-                ml_df['DayOfWeek'] = pd.to_datetime(ml_df['Scheduled_Time']).dt.dayofweek
-                ml_df['Month'] = pd.to_datetime(ml_df['Scheduled_Time']).dt.month
-                ml_df['IsWeekend'] = ml_df['DayOfWeek'].isin([5, 6]).astype(int)
-                ml_df['IsPeakHour'] = ml_df['Hour'].isin([7, 8, 19, 20, 21]).astype(int)
-                
-                # Encode categorical variables
-                label_encoders = {}
-                categorical_features = ['Airline', 'Runway', 'Aircraft_Type', 'Origin', 'Destination']
-                
-                for feature in categorical_features:
-                    if feature in ml_df.columns:
-                        le = LabelEncoder()
-                        ml_df[f'{feature}_encoded'] = le.fit_transform(ml_df[feature].astype(str))
-                        label_encoders[feature] = le
-                
-                # Select features for training
-                feature_columns = [
-                    'Hour', 'DayOfWeek', 'Month', 'IsWeekend', 'IsPeakHour', 'Capacity'
-                ]
-                
-                # Add encoded categorical features
-                for feature in categorical_features:
-                    if f'{feature}_encoded' in ml_df.columns:
-                        feature_columns.append(f'{feature}_encoded')
-                
-                # Prepare training data
-                X = ml_df[feature_columns].fillna(0)
-                y = ml_df['Delay_Minutes'].fillna(0)
-                
-                # Split data for training and testing
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.3, random_state=42
-                )
-                
-                # Scale features
-                scaler = StandardScaler()
-                X_train_scaled = scaler.fit_transform(X_train)
-                X_test_scaled = scaler.transform(X_test)
-                
-                # Train multiple models and choose the best
-                models = {
-                    'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10),
-                    'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6)
-                }
-                
-                best_model = None
-                best_score = float('inf')
-                model_results = {}
-                
-                for name, model in models.items():
-                    # Train model
-                    if name == 'Random Forest':
-                        model.fit(X_train, y_train)
-                        y_pred = model.predict(X_test)
-                    else:
-                        model.fit(X_train_scaled, y_train)
-                        y_pred = model.predict(X_test_scaled)
-                    
-                    # Calculate metrics
-                    mae = mean_absolute_error(y_test, y_pred)
-                    mse = mean_squared_error(y_test, y_pred)
-                    r2 = r2_score(y_test, y_pred)
-                    
-                    model_results[name] = {
-                        'model': model,
-                        'mae': mae,
-                        'mse': mse,
-                        'r2': r2,
-                        'rmse': np.sqrt(mse)
-                    }
-                    
-                    if mae < best_score:
-                        best_score = mae
-                        best_model = model
-                        best_model_name = name
-                
-                # Generate predictions for all flights using best model
-                if best_model_name == 'Random Forest':
-                    predictions = best_model.predict(X)
-                else:
-                    X_scaled = scaler.transform(X)
-                    predictions = best_model.predict(X_scaled)
-                
-                # Create predictions dataframe
-                predictions_df = ml_df.copy()
-                predictions_df['Predicted_Delay'] = np.maximum(0, predictions)  # No negative delays
+                predictor = DelayPredictor(model_type=model_type)
+                metrics = predictor.train(df, cv=5 if use_cv else 1, tune=use_tuning)
+
+                # Save metadata and model
+                model_path = f"models/{model_name}.joblib"
+                predictor.save_model(model_path)
+                st.session_state.ml_model = predictor.model
+                st.session_state.feature_columns = predictor.feature_columns
+                st.session_state.model_type = predictor.model_type
+                st.session_state.scaler = predictor.scaler
+                st.session_state.ml_model_path = model_path
+
+                if save_to_mlflow:
+                    X = df[predictor.feature_columns].fillna(0)
+                    predictor.log_model_mlflow(X, df['Delay_Minutes'].fillna(0))
+
+                predictions_df = df.copy()
+                predictions_df['Predicted_Delay'] = predictor.predict(df)
                 predictions_df['Prediction_Error'] = abs(predictions_df['Delay_Minutes'] - predictions_df['Predicted_Delay'])
-                predictions_df['Risk_Score'] = (
-                    predictions_df['Predicted_Delay'] * 0.7 + 
-                    predictions_df['Prediction_Error'] * 0.3
-                )
-                
-                # Generate real risk analysis based on ML predictions
-                risk_data = self._generate_ml_risk_predictions(predictions_df, model_results[best_model_name])
-                
-                # Store everything in session state
-                st.session_state.ml_model = best_model
-                st.session_state.best_model_name = best_model_name
-                st.session_state.scaler = scaler
-                st.session_state.label_encoders = label_encoders
-                st.session_state.feature_columns = feature_columns
-                st.session_state.model_results = model_results
+                predictions_df['Risk_Score'] = predictions_df['Predicted_Delay'] * 0.7 + predictions_df['Prediction_Error'] * 0.3
+
+                risk_data = self._generate_ml_risk_predictions(predictions_df, metrics)
                 st.session_state.predictions_data = predictions_df
                 st.session_state.risk_data = risk_data
-                
-                # Display training results
-                st.success(f"✅ Real ML Model Trained Successfully!")
-                
+                st.session_state.model_results = {model_type: metrics}
+                st.session_state.best_model_name = model_type
+
+                st.success(f"✅ Real ML Model Trained Successfully with {model_type}!")
+
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Best Model", best_model_name)
-                    st.metric("Mean Absolute Error", f"{model_results[best_model_name]['mae']:.2f} min")
+                    st.metric("Model Type", model_type)
+                    st.metric("Train MAE", f"{metrics['train_mae']:.2f} min")
                 with col2:
-                    st.metric("R² Score", f"{model_results[best_model_name]['r2']:.3f}")
-                    st.metric("RMSE", f"{model_results[best_model_name]['rmse']:.2f} min")
+                    st.metric("Test MAE", f"{metrics['test_mae']:.2f} min")
+                    st.metric("Test R²", f"{metrics['test_r2']:.3f}")
                 with col3:
-                    st.metric("Training Samples", len(X_train))
-                    st.metric("Test Samples", len(X_test))
-                
-                # Show feature importance for Random Forest
-                if best_model_name == 'Random Forest':
-                    st.subheader("🎯 Most Important Features for Delay Prediction")
-                    feature_importance = pd.DataFrame({
-                        'Feature': feature_columns,
-                        'Importance': best_model.feature_importances_
-                    }).sort_values('Importance', ascending=False)
-                    
-                    import plotly.express as px
-                    fig = px.bar(feature_importance.head(8), x='Importance', y='Feature', 
-                                orientation='h', title='Feature Importance in Delay Prediction')
+                    if use_cv:
+                        st.metric("CV MAE", f"{metrics.get('cv_mae_mean', 0):.2f} min")
+                        st.metric("CV R²", f"{metrics.get('cv_r2_mean', 0):.3f}")
+                    st.metric("Saved Model", model_path)
+
+                if metrics.get('feature_importance'):
+                    feature_importance = pd.DataFrame(
+                        sorted(metrics['feature_importance'].items(), key=lambda x: x[1], reverse=True),
+                        columns=['Feature', 'Importance']
+                    ).head(10)
+                    fig = px.bar(feature_importance, x='Importance', y='Feature', orientation='h',
+                                title='Top Feature Importance')
                     st.plotly_chart(fig, use_container_width=True)
-                
-                st.info(f"📊 Model trained on {len(df)} real flights with {len(feature_columns)} features")
-                
+
+                st.info(f"📊 Model trained on {len(df)} actual flights")
+
             except Exception as e:
                 st.error(f"❌ ML Training failed: {str(e)}")
-                st.info("Make sure you have sufficient data with the required columns.")
+                st.info("Make sure your dataset includes Scheduled_Time, Delay_Minutes, and basic flight metadata.")
     
     
     def _generate_ml_risk_predictions(self, predictions_df, model_metrics):
