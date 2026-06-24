@@ -4,7 +4,6 @@ An AI-powered airline operations management dashboard designed to optimize fligh
 
 ![Python](https://img.shields.io/badge/python-v3.10+-blue.svg)
 ![Streamlit](https://img.shields.io/badge/streamlit-v1.25+-red.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ##  Problem Statement
 
