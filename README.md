@@ -21,14 +21,14 @@ Due to capacity limitations and heavy passenger load, flight operations at busy 
 - **NLP Query Interface**: Natural language processing for operational queries
 - **Interactive Dashboard**: Comprehensive Streamlit-based visualization
 
-## 📋 Requirements
+## Requirements
 
 - **Python**: 3.10 or higher
 - **Operating System**: Windows / macOS / Linux
 - **Package Manager**: pip
 - **Memory**: 4GB RAM minimum (8GB recommended for large datasets)
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 Flight-Schedule-Optimization/
